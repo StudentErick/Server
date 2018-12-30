@@ -6,18 +6,6 @@
 
 #IncludeRegexTransform: 
 
-/home/erick/Desktop/Server/MyServer.cpp
-cstring
--
-ios
--
-utility
--
-fcntl.h
--
-MyServer.h
-/home/erick/Desktop/Server/MyServer.h
-
 /home/erick/Desktop/Server/MyServer.h
 TcpServer.h
 /home/erick/Desktop/Server/TcpServer.h
@@ -84,6 +72,14 @@ condition_variable
 mutex
 -
 utility
+-
+
+/home/erick/Desktop/Server/main.cpp
+iostream
+-
+MyServer.h
+/home/erick/Desktop/Server/MyServer.h
+string.h
 -
 
 /home/erick/Desktop/Server/user_data.h

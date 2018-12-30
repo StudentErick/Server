@@ -47,6 +47,8 @@ private:
 
     std::unique_ptr<std::fstream> m_fileStream;       // 文件流
 
+    std::atomic_int cnt;
+
 };
 
 

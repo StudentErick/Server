@@ -16,6 +16,8 @@ MyServer::MyServer(int _proNums, int _conNums, int _maxWaiters) :
     m_bPoolBlock = false;
     m_bStop = false;
 
+    cnt = 0;
+
     m_producerThreads = std::make_unique<ThreadPool>(_proNums);
     m_consumerThreads = std::make_unique<ThreadPool>(_conNums);
 
@@ -32,8 +34,8 @@ MyServer::MyServer(int _proNums, int _conNums, int _maxWaiters) :
 
     // 只要服务器开始运行，写文件的线程就处于就绪等待的状态
     m_consumerThreads->enqueue([this]() {
-        while(!m_bStop) {  // 一定要记住这里的死循环，一次自动机模型。。。WTF,,MMP,,坑死劳资了。。。。
-            std::unique_lock<std::mutex> lock(m_mtxWrite);
+        while (!m_bStop) {  // 一定要记住这里的死循环，一次自动机模型。。。WTF,,MMP,,坑死劳资了。。。。
+            std::unique_lock <std::mutex> lock(m_mtxWrite);
             m_condWrite.wait(lock, [this]() -> bool {  // 消息队列不空，整个连接池没有被锁住
                 return !m_qMsgQue.empty() && !m_bPoolBlock && !m_bWriteBlock;
             });
@@ -53,6 +55,7 @@ MyServer::MyServer(int _proNums, int _conNums, int _maxWaiters) :
                  * 在这里需要添加/n的判别，但是先进行测试，不管那么多
                  */
                 std::string str = std::move(*it->clientMessage);
+                str += "\n";
                 *(m_fileStream) << str;  // 写入文件
                 std::cout << "-------------file:" << str << std::endl;///////////////////////////测试
                 it->clientMutex->unlock();
@@ -60,12 +63,22 @@ MyServer::MyServer(int _proNums, int _conNums, int _maxWaiters) :
             --m_iOpeNum;  // 操作的个数-1
             m_bWriteBlock = false;
             m_condPool.notify_all();  // 唤醒写读写整个连接池的操作
+            m_condWrite.notify_all();
         }
     });
+
+
+    // 这里处理标准输入，用于终止整个服务器
+    epoll_event ev;
+    bzero(&ev, sizeof(ev));
+    ev.data.fd = 0;
+    ev.events = EPOLLIN | EPOLLRDHUP | EPOLLET;
+    int ret = epoll_ctl(m_epfd, EPOLL_CTL_ADD, 0, &ev);
 }
 
 MyServer::~MyServer() {
     m_fileStream->close();
+    std::cout << "---------------cnt = " << cnt << std::endl;
 }
 
 void MyServer::newConnection() {
@@ -93,7 +106,7 @@ void MyServer::newConnection() {
 
     // 向连接池加入新的连接，在这里需要在子线程中完成
     m_producerThreads->enqueue([this, connfd, client_address]() {
-        std::unique_lock<std::mutex> lock(m_mtxPool);
+        std::unique_lock <std::mutex> lock(m_mtxPool);
         m_condPool.wait(lock, [this]() -> bool {
             return !m_bPoolBlock && m_iOpeNum <= 0;
         });
@@ -121,9 +134,9 @@ void MyServer::existConnection(int index) {
 
         // 取消在连接池的连接在子线程中完成
         m_producerThreads->enqueue([this, fd]() -> bool {
-            std::unique_lock<std::mutex> lock(m_mtxPool);
+            std::unique_lock <std::mutex> lock(m_mtxPool);
             m_condPool.wait(lock, [this]() -> bool {
-                return !m_bPoolBlock && m_iOpeNum <= 0;
+                return !m_bPoolBlock;
             });
             m_bPoolBlock = true;  // 加锁标记
             sockaddr_in addr;
@@ -132,18 +145,20 @@ void MyServer::existConnection(int index) {
             m_bPoolBlock = false; // 解锁标记
             m_condWrite.notify_all();
             m_condPool.notify_all();
+
+            // std::cout << "---------------cnt = " << cnt << std::endl;
         });
 
     } else if (m_epollEvents[index].events & EPOLLIN) {  // 客户端发来消息
 
-        std::cout << "receive msg\n";
+        //std::cout << "receive msg\n";
 
         int fd = m_epollEvents[index].data.fd;
 
         // 接受消息并通知给写文件线程在生产者子线程中完成
         m_producerThreads->enqueue([this, fd]() {
 
-            std::unique_lock<std::mutex> lock(m_mtxPool);
+            std::unique_lock <std::mutex> lock(m_mtxPool);
             m_condWrite.wait(lock, [this]() -> bool {   // 没有被全局封锁
                 return !m_bPoolBlock;
             });
@@ -159,15 +174,16 @@ void MyServer::existConnection(int index) {
             char buf[MAX_CHAR_BUFFER];
             memset(buf, 0, MAX_CHAR_BUFFER);
             it->clientMutex->lock();  // 接收数据要加锁
-            std::cout << "produce sub thread deal msg\n";
             while (recv(fd, buf, MAX_CHAR_BUFFER, MSG_DONTWAIT) > 0) {
                 *(it->clientMessage) += std::string(buf);
-                std::cout << "msg = " << *(it->clientMessage) << std::endl;
                 memset(buf, 0, MAX_CHAR_BUFFER);
+
+                ++cnt;
             }
             it->clientMutex->unlock();
             m_qMsgQue.push(fd);
             m_condWrite.notify_all();
+            m_condPool.notify_all();
             --m_iOpeNum;
         });
     }

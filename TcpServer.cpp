@@ -28,12 +28,12 @@ bool TcpServer::startService(int timeout) {
     bzero(&ev, sizeof(ev));
 
     ev.data.fd = m_listen_sockfd;
-    ev.events = EPOLLIN | EPOLLET;    // 新来的连接
+    ev.events = EPOLLIN;    // 新来的连接
     if (epoll_ctl(m_epfd, EPOLL_CTL_ADD, m_listen_sockfd, &ev) < 0) {
         return false;
     }
 
-    std::cout << "service started...\n";
+    std::cout << "service started, input any char and press enter to end server...\n";
 
     // 服务器的监听循环
     while (true) {
@@ -44,8 +44,11 @@ bool TcpServer::startService(int timeout) {
 
         for (int i = 0; i < nfds; ++i) {
             if (m_epollEvents[i].data.fd == m_listen_sockfd) {
+                //std::cout << "-------------------new connection----------------------\n";
                 // 处理新的连接
                 newConnection();
+            } else if (m_epollEvents[i].data.fd == 0) {
+                return true;  // 终止服务器
             } else {
                 // 处理已经存在的连接
                 existConnection(i);
